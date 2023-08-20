@@ -47,6 +47,12 @@ argsp.add_argument("-w",
                    help="Actually write the object into the database")
 argsp.add_argument("path",
                    help="Read object from <file>")
+argsp = argsubparsers.add_parser(
+    "log", help="Display history of a given commit.")
+argsp.add_argument("commit",
+                   default="HEAD",
+                   nargs="?",
+                   help="Commit to start at.")
 
 
 def main(argv=sys.argv[1:]):
@@ -204,6 +210,47 @@ def cmd_hash_object(args):
     with open(args.path, "rb") as fd:
         sha = object_hash(fd, args.type.encode(), repo)
         print(sha)
+
+
+def cmd_log(args):
+    repo = repo_find()
+
+    print("digraph wyaglog{")
+    print("  node[shape=rect]")
+    log_graphviz(repo, object_find(repo, args.commit), set())
+    print("}")
+
+
+def log_graphviz(repo, sha, seen):
+    if sha in seen:
+        return
+    seen.add(sha)
+
+    commit = object_read(repo, sha)
+    short_has = sha[0:8]
+    message = commit.kvlm[None].decode("utf8").strip()
+    message = message.replace("\\", "\\\\")
+    message = message.replace("\"", "\\\"")
+
+    if "\n" in message:  # keep only the first line
+        message = message[:message.index("\n")]
+
+    print("  c_{0} [label=\"{1}: {2}\"]".format(sha, sha[0:7], message))
+    assert commit.fmt == b'commit'
+
+    if not b'parent' in commit.kvlm.keys():
+        # Base case: the initial commit
+        return
+
+    parents = commit.kvlm[b'parent']
+
+    if type(parents) != list:
+        parents = [parents]
+
+    for p in parents:
+        p = p.decode("ascii")
+        print("  c_{0} -> c_{1};".format(sha, p))
+        log_graphviz(repo, p, seen)
 
 
 def object_hash(fd, fmt, repo=None):
