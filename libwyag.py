@@ -65,12 +65,29 @@ argsp = argsubparsers.add_parser(
 argsp.add_argument("commit", help="The commit or tree to checkout")
 argsp.add_argument("path", help="The EMPTY directory to checkout on.")
 
+argsp = argsubparsers.add_parser("show-ref", help="List references.")
+
 
 def main(argv=sys.argv[1:]):
     args = argparser.parse_args(argv)
     match args.command:
-
+        case "add": cmd_add(args)
+        case "cat-file": cmd_cat_file(args)
+        case "check-ignore": cmd_check_ignore(args)
+        case "checkout": cmd_checkout(args)
+        case "commit": cmd_commit(args)
+        case "hash-object": cmd_hash_object(args)
         case "init": cmd_init(args)
+        case "log": cmd_log(args)
+        case "ls-files": cmd_ls_files(args)
+        case "ls-tree": cmd_ls_tree(args)
+        case "merge": cmd_merge(args)
+        case "rebase": cmd_rebase(args)
+        case "rev-parse": cmd_rev_parse(args)
+        case "rm": cmd_rm(args)
+        case "show-ref": cmd_show_ref(args)
+        case "status": cmd_status(args)
+        case "tag": cmd_tag(args)
         case _: print("Bad command.")
 
 
@@ -255,6 +272,24 @@ def cmd_checkout(args):
         os.makedirs(args.path)
 
     tree_checkout(repo, obj, os.path.realpath(args.path))
+
+
+def cmd_show_ref(args):
+    repo = repo_find()
+    refs = ref_list(repo)
+    show_ref(repo, refs, prefix="refs")
+
+
+def show_ref(repo, refs, with_hash=True, prefix=""):
+    for k, v in refs.items():
+        if type(v) == str:
+            print("{0}{1}{2}".format(
+                v + " " if with_hash else "",
+                prefix + "/" if prefix else "",
+                k))
+        else:
+            show_ref(repo, v, with_hash=with_hash, prefix="{0}{1}{2}".format(
+                prefix, "/" if prefix else "", k))
 
 
 def tree_checkout(repo, tree, path):
@@ -603,4 +638,40 @@ def tree_serialize(obj):
         ret += b'\x00'
         sha = int(i.sha, 16)
         ret += sha.to_bytes(20, byteorder="big")
+    return ret
+
+
+def ref_resolve(repo, ref):
+    path = repo_file(repo, ref)
+
+    # Sometimes, an indirect reference may be broken.  This is normal
+    # in one specific case: we're looking for HEAD on a new repository
+    # with no commits.  In that case, .git/HEAD points to "ref:
+    # refs/heads/main", but .git/refs/heads/main doesn't exist yet
+    # (since there's no commit for it to refer to).
+    if not os.path.isfile(path):
+        return None
+
+    with open(path, 'r') as fp:
+        data = fp.read()[:-1]  # drop final \n
+    if data.startswith("ref: "):
+        return ref_resolve(repo, data[5:])
+    else:
+        return data
+
+
+def ref_list(repo, path=None):
+    if not path:
+        path = repo_dir(repo, "refs")
+
+    ret = collections.OrderedDict()
+    # Git shows refs sorted.  To do the same, we use
+    # an OrderedDict and sort the output of listdir
+    for f in sorted(os.listdir(path)):
+        can = os.path.join(path, f)
+        if os.path.isdir(can):
+            ret[f] = ref_list(repo, can)
+        else:
+            ret[f] = ref_resolve(repo, can)
+
     return ret
