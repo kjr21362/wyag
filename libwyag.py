@@ -23,6 +23,15 @@ argsp.add_argument("path",
                    nargs="?",
                    default=".",
                    help="Where to create the repository.")
+argsp = argsubparsers.add_parser(
+    "cat-file", help="Provide content of repository objects")
+argsp.add_argument("type",
+                   metavar="type",
+                   choices=["blob", "commit", "tag", "tree"],
+                   help="Specify the type")
+argsp.add_argument("object",
+                   metavar="object",
+                   help="The object to display")
 
 
 def main(argv=sys.argv[1:]):
@@ -164,6 +173,16 @@ def repo_find(path=".", required=True):
 
 def cmd_init(args):
     repo_create(args.path)
+
+
+def cmd_cat_file(args):
+    repo = repo_find()
+    cat_file(repo, args.object, fmt=args.type.encode())
+
+
+def cat_file(repo, obj, fmt=None):
+    obj = object_read(repo, object_find(repo, obj, fmt=fmt))
+    sys.stdout.buffer.write(obj.serialize())
 
 
 class GitObject(object):
