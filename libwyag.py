@@ -60,6 +60,11 @@ argsp.add_argument("-r",
                    help="Recursive into sub-trees")
 argsp.add_argument("tree", help="A tree-ish object")
 
+argsp = argsubparsers.add_parser(
+    "checkout", help="Checkout a commit inside of a directory.")
+argsp.add_argument("commit", help="The commit or tree to checkout")
+argsp.add_argument("path", help="The EMPTY directory to checkout on.")
+
 
 def main(argv=sys.argv[1:]):
     args = argparser.parse_args(argv)
@@ -230,6 +235,39 @@ def cmd_log(args):
 def cmd_ls_tree(args):
     repo = repo_find()
     ls_tree(repo, args.tree, args.recursive)
+
+
+def cmd_checkout(args):
+    repo = repo_find()
+    obj = object_read(repo, object_find(repo, args.commit))
+
+    # If the object is a commit, we grab its tree
+    if obj.fmt == b'commit':
+        obj = object_read(repo, obj.kvlm[b'tree'].decode("ascii"))
+
+    # verify that path is an empty directory
+    if os.path.exists(args.path):
+        if not os.path.isdir(args.path):
+            raise Exception("Not a directory {0}!".format(args.path))
+        if os.listdir(args.path):
+            raise Exception("Not empty {0}!".format(args.path))
+    else:
+        os.makedirs(args.path)
+
+    tree_checkout(repo, obj, os.path.realpath(args.path))
+
+
+def tree_checkout(repo, tree, path):
+    for item in tree.items:
+        obj = object_read(repo, item.sha)
+        dest = os.path.join(path, item.path)
+
+        if obj.fmt == b'tree':
+            os.mkdir(dest)
+            tree_checkout(repo, obj, dest)
+        elif obj.fmt == b'blob':
+            with open(dest, 'wb') as f:
+                f.write(obj.blobdata)
 
 
 def ls_tree(repo, ref, recursive=None, prefix=""):
