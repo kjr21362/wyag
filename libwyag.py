@@ -370,7 +370,7 @@ def ls_tree(repo, ref, recursive=None, prefix=""):
 
         if not (recursive and type == 'tree'):
             print("{0} {1} {2}\t{3}".format(
-                "0" * (6 - len(item.mode) + item.mode.decode("ascii")),
+                "0" * (6 - len(item.mode)) + item.mode.decode("ascii"),
                 # Git's ls-tree displays the type
                 # of the object pointed to.
                 type,
@@ -488,8 +488,82 @@ def object_read(repo, sha):
         return c(raw[y+1:])
 
 
+def object_resolve(repo, name):
+    """Resolve name to an object hash in repo.
+
+    This function is aware of:
+
+    - the HEAD literal
+    - short and long hashes
+    - tags
+    - branches
+    - remote branches"""
+    candidates = list()
+    hashRE = re.compile(r"^[0-9A-Fa-f]{4,40}$")
+
+    if not name.strip():
+        return None
+
+    # Head is nonambiguous
+    if name == "HEAD":
+        return [ref_resolve(repo, "HEAD")]
+
+    # if it's a hex string, try for a hash
+    if hashRE.match(name):
+        # This may be a hash, either small or full. 4 seems to be the
+        # minimal length for git to consider something a short hash.
+        # This limit is documented in man git-rev-parse
+        name = name.lower()
+        prefix = name[0:2]
+        path = repo_dir(repo, "objects", prefix, mkdir=False)
+        if path:
+            rem = name[2:]
+            for f in os.listdir(path):
+                if f.startswith(rem):
+                    candidates.append(prefix + f)
+
+    # try for references
+    as_tag = ref_resolve(repo, "refs/tags/" + name)
+    if as_tag:
+        candidates.append(as_tag)
+
+    as_branch = ref_resolve(repo, "refs/heads/" + name)
+    if as_branch:
+        candidates.append(as_branch)
+
+    return candidates
+
+
 def object_find(repo, name, fmt=None, follow=True):
-    return name
+    sha = object_resolve(repo, name)
+
+    if not sha:
+        raise Exception("no such reference {0}.".format(name))
+
+    if len(sha) > 1:
+        raise Exception(
+            "Ambiguous reference {0}: Candidates are: \n - {1}".format(name, "\n - ".join(sha)))
+
+    sha = sha[0]
+
+    if not fmt:
+        return sha
+
+    while True:
+        obj = object_read(repo, sha)
+
+        if obj.fmt == fmt:
+            return sha
+        if not follow:
+            return None
+
+        # follow tags
+        if obj.fmt == b'tag':
+            sha = obj.kvlm[b'object'].decode("ascii")
+        elif obj.fmt == b'commit' and fmt == b'tree':
+            sha = obj.kvlm[b'tree'].decode("ascii")
+        else:
+            return None
 
 
 def object_write(obj, repo=None):
