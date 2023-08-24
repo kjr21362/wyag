@@ -94,6 +94,10 @@ argsp.add_argument("path", nargs="+", help="Paths to check")
 
 argsp = argsubparsers.add_parser("status", help="Show the working tree status")
 
+argsp = argsubparsers.add_parser(
+    "rm", help="Remove files from the working tree and the index.")
+argsp.add_argument("path", nargs="+", help="Files to remove")
+
 
 def main(argv=sys.argv[1:]):
     args = argparser.parse_args(argv)
@@ -384,6 +388,67 @@ def branch_get_active(repo):
         return False
 
 
+def index_write(repo, index):
+    with open(repo_file(repo, "index"), "wb") as f:
+
+        # HEADER
+
+        # Write the magic bytes.
+        f.write(b"DIRC")
+        # Write version number.
+        f.write(index.version.to_bytes(4, "big"))
+        # Write the number of entries.
+        f.write(len(index.entries).to_bytes(4, "big"))
+
+        # ENTRIES
+
+        idx = 0
+        for e in index.entries:
+            f.write(e.ctime[0].to_bytes(4, "big"))
+            f.write(e.ctime[1].to_bytes(4, "big"))
+            f.write(e.mtime[0].to_bytes(4, "big"))
+            f.write(e.mtime[1].to_bytes(4, "big"))
+            f.write(e.dev.to_bytes(4, "big"))
+            f.write(e.ino.to_bytes(4, "big"))
+
+            # Mode
+            mode = (e.mode_type << 12) | e.mode_perms
+            f.write(mode.to_bytes(4, "big"))
+
+            f.write(e.uid.to_bytes(4, "big"))
+            f.write(e.gid.to_bytes(4, "big"))
+
+            f.write(e.fsize.to_bytes(4, "big"))
+            # @FIXME Convert back to int.
+            f.write(int(e.sha, 16).to_bytes(20, "big"))
+
+            flag_assume_valid = 0x1 << 15 if e.flag_assume_valid else 0
+
+            name_bytes = e.name.encode("utf8")
+            bytes_len = len(name_bytes)
+            if bytes_len >= 0xFFF:
+                name_length = 0xFFF
+            else:
+                name_length = bytes_len
+
+            # We merge back three pieces of data (two flags and the
+            # length of the name) on the same two bytes.
+            f.write((flag_assume_valid | e.flag_stage |
+                    name_length).to_bytes(2, "big"))
+
+            # Write back the name, and a final 0x00.
+            f.write(name_bytes)
+            f.write((0).to_bytes(1, "big"))
+
+            idx += 62 + len(name_bytes) + 1
+
+            # Add padding if necessary.
+            if idx % 8 != 0:
+                pad = 8 - (idx % 8)
+                f.write((0).to_bytes(pad, "big"))
+                idx += pad
+
+
 def cmd_status_branch(repo):
     branch = branch_get_active(repo)
     if branch:
@@ -485,6 +550,51 @@ def cmd_status_index_worktree(repo, index):
         # its name without its contents.
         if not check_ignore(ignore, f):
             print(" ", f)
+
+
+def cmd_rm(args):
+    repo = repo_find()
+    rm(repo, args.path)
+
+
+def rm(repo, paths, delete=True, skip_missing=False):
+    # Find and read the index
+    index = index_read(repo)
+
+    worktree = repo.worktree + os.sep
+
+    # Make paths absolute
+    abspaths = list()
+    for path in paths:
+        abspath = os.path.abspath(path)
+        if abspath.startswith(worktree):
+            abspaths.append(abspath)
+        else:
+            raise Exception(
+                "Cannot remove paths outside of worktree: {}".format(paths))
+
+    kept_entries = list()
+    remove = list()
+
+    for e in index.entries:
+        full_path = os.path.join(repo.worktree, e.name)
+
+        if full_path in abspaths:
+            remove.append(full_path)
+            abspaths.remove(full_path)
+        else:
+            kept_entries.append(e)  # Preserve entry
+
+    if len(abspaths) > 0 and not skip_missing:
+        raise Exception(
+            "Cannot remove paths not in the index: {}".format(abspaths))
+
+    if delete:
+        for path in remove:
+            os.unlink(path)
+
+    index.entries = kept_entries
+    index_write(repo, index)
 
 
 def gitignore_parse1(raw):
