@@ -121,8 +121,8 @@ def main(argv=sys.argv[1:]):
         case "log": cmd_log(args)
         case "ls-files": cmd_ls_files(args)
         case "ls-tree": cmd_ls_tree(args)
-        case "merge": cmd_merge(args)
-        case "rebase": cmd_rebase(args)
+        #case "merge": cmd_merge(args)
+        #case "rebase": cmd_rebase(args)
         case "rev-parse": cmd_rev_parse(args)
         case "rm": cmd_rm(args)
         case "show-ref": cmd_show_ref(args)
@@ -1537,7 +1537,7 @@ def commit_create(repo, tree, parent, author, timestamp, message):
 
     # Format timezone
     offset = int(timestamp.astimezone().utcoffset().total_seconds())
-    houts = offset // 3600
+    hours = offset // 3600
     minutes = (offset % 3600) // 60
     tz = "{}{:02}{:02}".format("+" if offset > 0 else "-", hours, minutes)
 
